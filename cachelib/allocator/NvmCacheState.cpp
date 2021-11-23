@@ -75,12 +75,14 @@ std::string NvmCacheState::getNvmCacheStateFilePath(
 
 NvmCacheState::NvmCacheState(const std::string& cacheDir,
                              bool encryptionEnabled,
-                             bool truncateAllocSize)
+                             bool truncateAllocSize,
+                             bool nvmCacheEnabled)
     : cacheDir_(cacheDir),
       creationTime_{util::getCurrentTimeSec()},
       encryptionEnabled_{encryptionEnabled},
-      truncateAllocSize_{truncateAllocSize} {
-  if (cacheDir_.empty()) {
+      truncateAllocSize_{truncateAllocSize},
+      nvmCacheEnabled_(nvmCacheEnabled) {
+  if (cacheDir_.empty() || !nvmCacheEnabled_) {
     return;
   }
 

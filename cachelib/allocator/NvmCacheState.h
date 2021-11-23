@@ -46,7 +46,8 @@ class NvmCacheState {
   // Intialize the object for the cacheDir.
   explicit NvmCacheState(const std::string& cacheDir,
                          bool encryptionEnabled,
-                         bool truncateAllocSize);
+                         bool truncateAllocSize,
+                         bool nvmCacheEnabled = true);
 
   // returns the time when the nvmcache associated with the cacheDir was
   // created
@@ -99,6 +100,9 @@ class NvmCacheState {
 
   // if enabled, only store user-requested size into nvm cache
   bool truncateAllocSize_{false};
+
+  // is NVM cache enabled
+  bool nvmCacheEnabled_{false};
 
   // a stream for writing metadata is created and kept open throughout the
   // lifetime of this object. This resolves any issue with a process's

@@ -51,7 +51,8 @@ CacheAllocator<CacheTrait>::CacheAllocator(Config config)
                         std::make_shared<MurmurHash2>()),
       cacheCreationTime_{util::getCurrentTimeSec()},
       nvmCacheState_{config_.cacheDir, config_.isNvmCacheEncryptionEnabled(),
-                     config_.isNvmCacheTruncateAllocSizeEnabled()} {
+                     config_.isNvmCacheTruncateAllocSizeEnabled(),
+                     config_.isNvmCacheEnabled()} {
   // TODO(MEMORY_TIER)
   if (std::holds_alternative<FileShmSegmentOpts>(
       memoryTierConfigs[0].getShmTypeOpts())) {
@@ -99,7 +100,8 @@ CacheAllocator<CacheTrait>::CacheAllocator(SharedMemNewT, Config config)
                         std::make_shared<MurmurHash2>()),
       cacheCreationTime_{util::getCurrentTimeSec()},
       nvmCacheState_{config_.cacheDir, config_.isNvmCacheEncryptionEnabled(),
-                     config_.isNvmCacheTruncateAllocSizeEnabled()} {
+                     config_.isNvmCacheTruncateAllocSizeEnabled(),
+                     config_.isNvmCacheEnabled()} {
   initCommon(false);
   shmManager_->removeShm(detail::kShmInfoName,
     PosixSysVSegmentOpts(config_.isUsingPosixShm()));
@@ -136,7 +138,8 @@ CacheAllocator<CacheTrait>::CacheAllocator(SharedMemAttachT, Config config)
                         std::make_shared<MurmurHash2>()),
       cacheCreationTime_{*metadata_.cacheCreationTime_ref()},
       nvmCacheState_{config_.cacheDir, config_.isNvmCacheEncryptionEnabled(),
-                     config_.isNvmCacheTruncateAllocSizeEnabled()} {
+                     config_.isNvmCacheTruncateAllocSizeEnabled(),
+                     config_.isNvmCacheEnabled()} {
   for (auto pid : *metadata_.compactCachePools_ref()) {
     isCompactCachePool_[pid] = true;
   }
@@ -207,7 +210,7 @@ CacheAllocator<CacheTrait>::restoreCCacheManager() {
 
 template <typename CacheTrait>
 void CacheAllocator<CacheTrait>::initCommon(bool dramCacheAttached) {
-  if (config_.nvmConfig.has_value()) {
+  if (config_.isNvmCacheEnabled()) {
     if (config_.nvmCacheAP) {
       nvmAdmissionPolicy_ = config_.nvmCacheAP;
     } else if (config_.rejectFirstAPNumEntries) {
@@ -230,7 +233,7 @@ void CacheAllocator<CacheTrait>::initCommon(bool dramCacheAttached) {
 
 template <typename CacheTrait>
 void CacheAllocator<CacheTrait>::initNvmCache(bool dramCacheAttached) {
-  if (!config_.nvmConfig.has_value()) {
+  if (!config_.isNvmCacheEnabled()) {
     return;
   }
 
@@ -3252,8 +3255,10 @@ GlobalCacheStats CacheAllocator<CacheTrait>::getGlobalCacheStats() const {
 
   const uint64_t currTime = util::getCurrentTimeSec();
   ret.ramUpTime = currTime - cacheCreationTime_;
-  ret.nvmUpTime = currTime - nvmCacheState_.getCreationTime();
   ret.nvmCacheEnabled = nvmCache_ ? nvmCache_->isEnabled() : false;
+  if (ret.nvmCacheEnabled) {
+    ret.nvmUpTime = currTime - nvmCacheState_.getCreationTime();
+  }
   ret.reaperStats = getReaperStats();
   ret.numActiveHandles = getNumActiveHandles();
 
