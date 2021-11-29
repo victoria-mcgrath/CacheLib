@@ -3250,9 +3250,7 @@ GlobalCacheStats CacheAllocator<CacheTrait>::getGlobalCacheStats() const {
   const uint64_t currTime = util::getCurrentTimeSec();
   ret.ramUpTime = currTime - cacheCreationTime_;
   ret.nvmCacheEnabled = nvmCache_ ? nvmCache_->isEnabled() : false;
-  if (nvmCacheState_.has_value()) {
-    ret.nvmUpTime = currTime - nvmCacheState_.value().getCreationTime();
-  }
+  ret.nvmUpTime = currTime - getNVMCacheCreationTime();
   ret.reaperStats = getReaperStats();
   ret.numActiveHandles = getNumActiveHandles();
 
