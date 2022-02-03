@@ -194,8 +194,7 @@ void generateAndInsert(LruAllocatorConfig& cfg,
   using Item = typename LruAllocator::Item;
   using RemoveCbData = typename LruAllocator::RemoveCbData;
   size_t itemsInserted = 0, itemsFound = 0, itemsEvicted = 0, itemsEvictedAndFound = 0;
-  std::set<std::string> movedKeys;
-  std::vector<RemoveCbData> removedData;
+  std::set<std::string> movedKeys, removedKeys;
   std::unique_ptr<LruAllocator> alloc;
 
   auto moveCb = [&](const Item& oldItem, Item& newItem, Item*) {
@@ -205,7 +204,7 @@ void generateAndInsert(LruAllocatorConfig& cfg,
   };
 
   auto removeCb = [&](const RemoveCbData& data) {
-    removedData.push_back(data);
+    removedKeys.insert(data.item.getKey().str());
   };
 
   cfg.setRemoveCallback(removeCb);
@@ -229,6 +228,7 @@ void generateAndInsert(LruAllocatorConfig& cfg,
     value += key.substr(0, itemSize % key.length());
     auto h = alloc->allocate(poolId, key, value.length());
     EXPECT_TRUE(h);
+    EXPECT_TRUE(h->getSize() >= value.length());
 
     std::memcpy(h->getWritableMemory(), value.c_str(), value.length());
 
@@ -245,14 +245,12 @@ void generateAndInsert(LruAllocatorConfig& cfg,
     }
   }
 
-  for (auto it = removedData.begin(); it != removedData.end(); ++it) {
-    auto x = alloc->find((*it).item.getKey().str());
-    if ((*it).context == facebook::cachelib::RemoveContext::kEviction) {
-      if (x) {
-        ++itemsEvictedAndFound;
-      } else {
-        ++itemsEvicted;
-      }
+  for (auto it = removedKeys.begin(); it != removedKeys.end(); ++it) {
+    auto x = alloc->find(*it);
+    if (x) {
+      ++itemsEvictedAndFound;
+    } else {
+      ++itemsEvicted;
     }
   }
 
@@ -260,8 +258,9 @@ void generateAndInsert(LruAllocatorConfig& cfg,
   std::cout << "; Tiers: " << ((cfg.getMemoryTierConfigs().size() > 1)? "true" : "false");
   std::cout << "; Items inserted: " << itemsInserted;
   std::cout << "; Items found: " << itemsFound;
+  std::cout << "; Items moved: " << movedKeys.size();
   std::cout << "; Items evicted: " << itemsEvicted;
-  std::cout << " (total items removed: " << removedData.size();
+  std::cout << " (total items removed: " << removedKeys.size();
   std::cout << ", items evicted and found: " << itemsEvictedAndFound << ")"<< std::endl;
 }
 
