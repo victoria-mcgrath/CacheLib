@@ -22,6 +22,8 @@ namespace facebook {
 namespace cachelib {
 namespace tests {
 
+constexpr size_t MB = 1024ULL * 1024ULL;
+constexpr size_t GB = MB * 1024ULL;
 
 using LruAllocatorConfig = CacheAllocatorConfig<LruAllocator>;
 using LruMemoryTierConfigs = LruAllocatorConfig::MemoryTierConfigs;
@@ -264,14 +266,16 @@ void generateAndInsert(LruAllocatorConfig& cfg,
   std::cout << ", items evicted and found: " << itemsEvictedAndFound << ")"<< std::endl;
 }
 
-LruAllocatorConfig create2TierCacheConfig(size_t totalCacheSize) {
+LruAllocatorConfig create2TierCacheConfig(size_t totalCacheSize, size_t numTiers = 2) {
   LruAllocatorConfig tieredCacheConfig{};
+  std::vector<MemoryTierCacheConfig> configs;
+  for (auto i = 1; i <= numTiers; ++i) {
+    configs.push_back(MemoryTierCacheConfig::fromFile(folly::sformat("/tmp/tier{}-{}", i, ::getpid())).setRatio(1));
+  }
   tieredCacheConfig.setCacheSize(totalCacheSize)
     .enableCachePersistence(folly::sformat("/tmp/multi-tier-test/{}", ::getpid()))
     .usePosixForShm()
-    .configureMemoryTiers(
-      {MemoryTierCacheConfig::fromFile(folly::sformat("/tmp/tier1{}", ::getpid())).setRatio(1),
-       MemoryTierCacheConfig::fromFile(folly::sformat("/tmp/tier2{}", ::getpid())).setRatio(1)});
+    .configureMemoryTiers(configs);
   return tieredCacheConfig;
 }
 
@@ -285,9 +289,9 @@ TEST_F(LruMemoryTiersTest, TestStressInserts) {
   std::vector<std::tuple<size_t, size_t, size_t, std::string>> stress_params = 
   {
     //params: total cache size, number of items to insert, size of data item, description
-    std::make_tuple(50 * 1024 * 1024, 1000, 256, "Cache is undersaturated, just a few data items"),
-    std::make_tuple(50 * 1024 * 1024, 108298, 256, "Data fills the entire 50Mb of DRAM-only cache"), 
-    std::make_tuple(50 * 1024 * 1024, 180000, 256, "Too much data for the cache size")
+    std::make_tuple(50 * MB, 1000, 256, "Cache is undersaturated, just a few data items"),
+    std::make_tuple(50 * MB, 108298, 256, "Data fills the entire 50Mb of DRAM-only cache"),
+    std::make_tuple(50 * MB, 180000, 256, "Too much data for the cache size")
   };
 
   for(auto params: stress_params) {
