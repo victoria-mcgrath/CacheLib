@@ -886,31 +886,31 @@ template <typename T>
 typename CacheAllocatorConfig<T>::MemoryTierConfigs
 CacheAllocatorConfig<T>::getMemoryTierConfigs() const {
   MemoryTierConfigs config = memoryTierConfigs;
-  size_t sum_ratios = 0;
+  size_t sumRatios = 0;
 
-  for (auto &tier_config: config) {
-    if (auto *v = std::get_if<PosixSysVSegmentOpts>(&tier_config.shmOpts)) {
+  for (auto &tierConfig: config) {
+    if (auto *v = std::get_if<PosixSysVSegmentOpts>(&tierConfig.shmOpts)) {
       v->usePosix = usePosixShm;
     }
 
-    sum_ratios += tier_config.getRatio();
+    sumRatios += tierConfig.getRatio();
   }
 
-  if (sum_ratios == 0)
+  if (sumRatios == 0)
     return config;
 
   // if ratios are used, size must be specified
   XDCHECK(size);
 
   // Convert ratios to sizes, size must be non-zero
-  size_t sum_sizes = 0;
-  size_t partition_size = size / sum_ratios;
-  for (auto& tier_config: config) {
-    tier_config.setSize(partition_size * tier_config.getRatio());
-    tier_config.setRatio(0);
-    sum_sizes += tier_config.getSize();
+  size_t sumSizes = 0;
+  size_t partitionSize = size / sumRatios;
+  for (auto& tierConfig: config) {
+    tierConfig.setSize(partitionSize * tierConfig.getRatio());
+    tierConfig.setRatio(0);
+    sumSizes += tierConfig.getSize();
   }
-
+  config.back().setSize(config.back().getSize() + (size - sumSizes));
   return config;
 }
 

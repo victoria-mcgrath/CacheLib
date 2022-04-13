@@ -190,6 +190,8 @@ class CacheBase {
   // pool id
   virtual const ICompactCache& getCompactCache(PoolId pid) const = 0;
 
+  unsigned getNumTiers() const;
+
  protected:
   // move bytes from one pool to another. The source pool should be at least
   // _bytes_ in size.
@@ -273,8 +275,6 @@ class CacheBase {
   // @param numSlabs   The number of slabs to reclaim for the pool
   // @return The number of slabs that were actually reclaimed (<= numSlabs)
   virtual unsigned int reclaimSlabs(PoolId id, size_t numSlabs) = 0;
-
-  unsigned getNumTiers() const;
 
   unsigned numTiers_ = 1;
 

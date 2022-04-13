@@ -14,16 +14,50 @@
  * limitations under the License.
  */
 
-#include "cachelib/allocator/tests/AllocatorMemoryTiersTest.h"
+#include "cachelib/allocator/tests/MemoryTiersTest.h"//"cachelib/allocator/tests/AllocatorMemoryTiersTest.h"
 
 namespace facebook {
 namespace cachelib {
 namespace tests {
 
+template <typename AllocatorT>
+class AllocatorMemoryTiersTest : public AllocatorTest<AllocatorT> {
+};
+
 using LruAllocatorMemoryTiersTest = AllocatorMemoryTiersTest<LruAllocator>;
 
 // TODO(MEMORY_TIER): add more tests with different eviction policies
-TEST_F(LruAllocatorMemoryTiersTest, MultiTiers) { this->testMultiTiers(); }
+
+TEST_F(LruAllocatorMemoryTiersTest, Allocate2TiersTest) {
+  auto config = configTieredCache<LruAllocator>(100 * Slab::kSize, 2);
+  auto allocator = std::make_unique<LruAllocator>(LruAllocator::SharedMemNew, config);
+}
+
+TEST_F(LruAllocatorMemoryTiersTest, ValidateTieredCacheSizeEqualTiers) {
+  const size_t maxTiers = 5;
+  size_t numSlabs = minSlabsNumber(maxTiers);
+  size_t cacheSize = numSlabs * Slab::kSize;
+
+  for(auto numTiers = 1; numTiers <= maxTiers; ++numTiers) {
+    auto config = configTieredCache<LruAllocator>(cacheSize, numTiers);
+    validateCacheSize(LruAllocator(LruAllocator::SharedMemNew, config), cacheSize);
+  }
+}
+
+TEST_F(LruAllocatorMemoryTiersTest, ValidateTieredCacheSizeUnevenTiers) {
+  const size_t maxTiers = 5;
+  size_t numSlabs = minSlabsNumber(maxTiers);
+  size_t cacheSize = numSlabs * Slab::kSize;
+
+  for(auto numTiers = 1; numTiers <= maxTiers; ++numTiers) {
+    std::vector<size_t> ratios{};
+    for (size_t i = numTiers; i > 0; --i) {
+      ratios.push_back(i);
+    }
+    auto config = configTieredCache<LruAllocator>(cacheSize, numTiers, ratios);
+    validateCacheSize(LruAllocator(LruAllocator::SharedMemNew, config), cacheSize);
+  }
+}
 
 } // end of namespace tests
 } // end of namespace cachelib

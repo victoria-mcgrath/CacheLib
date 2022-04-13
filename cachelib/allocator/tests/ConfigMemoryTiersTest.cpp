@@ -18,6 +18,7 @@
 
 #include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/tests/TestBase.h"
+#include "cachelib/allocator/tests/MemoryTiersTest.h"
 
 namespace facebook {
 namespace cachelib {
@@ -28,15 +29,13 @@ using LruMemoryTierConfigs = LruAllocatorConfig::MemoryTierConfigs;
 using Strings = std::vector<std::string>;
 using SizePair = std::tuple<size_t, size_t>;
 using SizePairs = std::vector<SizePair>;
+/* using StringDataKeyValue = std::pair<std::string, std::string>;
+using StringDataKeyValues = std::vector<StringDataKeyValue>; */
 
 const size_t defaultTotalCacheSize{1 * 1024 * 1024 * 1024};
 const std::string defaultCacheDir{"/var/metadataDir"};
 const std::string defaultPmemPath{"/dev/shm/p1"};
 const std::string defaultDaxPath{"/dev/dax0.0"};
-
-const size_t metaDataSize = 4194304;
-constexpr size_t MB = 1024ULL * 1024ULL;
-constexpr size_t GB = MB * 1024ULL;
 
 template <typename Allocator>
 class MemoryTiersTest : public AllocatorTest<Allocator> {
@@ -61,11 +60,11 @@ class MemoryTiersTest : public AllocatorTest<Allocator> {
           return i + config.getRatio();
         });
 
-    size_t partition_size = 0;
+    EXPECT_EQ(sum_sizes, expectedTotalCacheSize);
+
+    size_t partition_size = 0, remaining_capacity = actualConfig.getCacheSize();
     if (sum_ratios) {
       partition_size = actualConfig.getCacheSize() / sum_ratios;
-      /* Sum of sizes can be lower due to rounding down to partition_size. */
-      EXPECT_GE(sum_sizes, expectedTotalCacheSize - partition_size);
     }
 
     for (auto i = 0; i < configs.size(); ++i) {
@@ -75,7 +74,9 @@ class MemoryTiersTest : public AllocatorTest<Allocator> {
       if (configs[i].getRatio() && (i < configs.size() - 1)) {
         EXPECT_EQ(configs[i].getSize(), partition_size * configs[i].getRatio());
       }
+       remaining_capacity -= configs[i].getSize();
     }
+    EXPECT_EQ(remaining_capacity, 0);
   }
 
   LruAllocatorConfig createTestCacheConfig(
@@ -111,6 +112,7 @@ class MemoryTiersTest : public AllocatorTest<Allocator> {
                             folly::sformat("/tmp/tier{}-{}", i, ::getpid()))
                             .setRatio(1));
     }
+    //configs[0].setRatio(2);
     tieredCacheConfig.setCacheSize(totalCacheSize)
         .enableCachePersistence(
             folly::sformat("/tmp/multi-tier-test/{}", ::getpid()))
@@ -122,6 +124,7 @@ class MemoryTiersTest : public AllocatorTest<Allocator> {
   LruAllocatorConfig createDramCacheConfig(size_t totalCacheSize) {
     LruAllocatorConfig dramConfig{};
     dramConfig.setCacheSize(totalCacheSize);
+    dramConfig.enableCachePersistence(folly::sformat("/tmp/tier-{}", ::getpid()));
     return dramConfig;
   }
 };
@@ -223,34 +226,6 @@ TEST_F(LruMemoryTiersTest, TestInvalid2TierConfigSizesNeCacheSize) {
       createTestCacheConfig({defaultDaxPath, defaultPmemPath},
                             {std::make_tuple(0, 1), std::make_tuple(0, 1)}),
       std::invalid_argument);
-}
-
-TEST_F(LruMemoryTiersTest, TestTieredCacheSize) {
-  size_t totalSizes[] = {50 * MB, 77 * MB, 100 * MB, 101 * MB + MB / 2,
-                         1 * GB,  4 * GB,  8 * GB,   9 * GB};
-  size_t numTiers[] = {2, 3, 4};
-
-  auto getCacheSize = [&](size_t cacheSize, size_t tiers) {
-    std::unique_ptr<LruAllocator> alloc;
-    if (tiers < 2) {
-      alloc = std::unique_ptr<LruAllocator>(
-          new LruAllocator(createDramCacheConfig(cacheSize)));
-    } else {
-      alloc = std::unique_ptr<LruAllocator>(
-          new LruAllocator(LruAllocator::SharedMemNew,
-                           createTieredCacheConfig(cacheSize, tiers)));
-    }
-    return alloc->getCacheMemoryStats().cacheSize;
-  };
-
-  for (auto totalSize : totalSizes) {
-    auto dramCacheSize = getCacheSize(totalSize, 1);
-    for (auto n : numTiers) {
-      auto tieredCacheSize = getCacheSize(totalSize, n);
-      EXPECT_GT(dramCacheSize, tieredCacheSize);
-      EXPECT_GE(metaDataSize * n * 2, dramCacheSize - tieredCacheSize);
-    }
-  }
 }
 
 } // namespace tests
