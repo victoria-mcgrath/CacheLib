@@ -308,9 +308,44 @@ class InsertGeneratedData : public Function {
   }
 };
 
+template <typename Allocator, typename Function>
+class LookupGeneratedKeys : public Function {
+  using LookupTask = LookupGeneratedKeys<Allocator, Function>;
+
+ private:
+  size_t itemsFound_{0};
+
+ public:
+  LookupGeneratedKeys(FunctionContext<Allocator>& context)
+      : Function(context) {}
+
+  void operator()(const Range& r) {
+    itemsFound_ =
+        lookUpGeneratedKeys<Allocator>(r,
+                                       this->getContext().getDataSize(),
+                                       this->getContext().getAllocator());
+  }
+
+  size_t getStats() { return itemsFound_; }
+
+  std::vector<std::unique_ptr<LookupTask>> generateTasks(size_t numWorkers) {
+    std::vector<std::unique_ptr<LookupTask>> tasks;
+    for (auto i = 0; i < numWorkers; ++i) {
+      tasks.push_back(
+          std::unique_ptr<LookupTask>(new LookupTask(this->getContext())));
+    }
+    return tasks;
+  }
+  void destroyTasks(std::vector<std::unique_ptr<LookupTask>>& tasks) {
+    tasks.erase(tasks.begin(), tasks.end());
+  }
+};
+
 using Context = FunctionContext<LruAllocator>;
 using InsertGeneratedDataFunction =
     InsertGeneratedData<LruAllocator, Function<Context>>;
+using LookupGeneratedKeysFunction =
+    LookupGeneratedKeys<LruAllocator, Function<Context>>;
 
 } // namespace tests
 } // namespace cachelib
