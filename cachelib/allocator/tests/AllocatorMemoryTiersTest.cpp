@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "cachelib/allocator/tests/MemoryTiersTest.h"//"cachelib/allocator/tests/AllocatorMemoryTiersTest.h"
+#include "cachelib/allocator/tests/MemoryTiersTest.h"
 
 namespace facebook {
 namespace cachelib {
