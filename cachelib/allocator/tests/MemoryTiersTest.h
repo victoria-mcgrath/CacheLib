@@ -18,6 +18,7 @@
 
 #include <chrono>
 
+#include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/CacheAllocatorConfig.h"
 #include "cachelib/allocator/MemoryTierCacheConfig.h"
 #include "cachelib/allocator/tests/TestBase.h"
@@ -35,17 +36,37 @@ constexpr size_t GB = MB * KB;
 
 const char endOfPattern[] = "x";
 
+using LruAllocatorConfig = CacheAllocatorConfig<LruAllocator>;
+using LruMemoryTierConfigs = LruAllocatorConfig::MemoryTierConfigs;
+using StringDataKeyValue = std::pair<std::string, std::string>;
+using StringDataKeyValues = std::vector<StringDataKeyValue>;
 using Range = std::pair<size_t, size_t>;
+using Item = typename LruAllocator::Item;
+using RemoveCbData = typename LruAllocator::RemoveCbData;
+
+thread_local std::set<std::string> movedKeys;
+thread_local std::set<std::string> removedKeys;
+
+auto moveCb = [&](const Item& oldItem, Item& newItem, Item*) {
+  std::memcpy(newItem.getWritableMemory(), oldItem.getMemory(),
+              oldItem.getSize());
+  movedKeys.insert(oldItem.getKey().str());
+};
+
+auto removeCb = [&](const RemoveCbData& data) {
+  removedKeys.insert(data.item.getKey().str());
+};
 
 template <typename AllocatorT = LruAllocator>
 typename AllocatorT::Config configTieredCache(size_t cacheSize,
-    size_t numTiers,
-    std::vector<size_t> ratios = {}) {
+                                              size_t numTiers,
+                                              std::vector<size_t> ratios = {}) {
   typename AllocatorT::Config config;
   std::vector<MemoryTierCacheConfig> tierConfig;
 
   if (ratios.size() && (numTiers != ratios.size())) {
-    throw std::invalid_argument("Number of new ratios doesn't match number of memory tiers.");
+    throw std::invalid_argument(
+        "Number of new ratios doesn't match number of memory tiers.");
   }
 
   config.setCacheSize(cacheSize);
@@ -54,15 +75,14 @@ typename AllocatorT::Config configTieredCache(size_t cacheSize,
     if (i < ratios.size()) {
       ratio = ratios[i];
     }
-    tierConfig.push_back(
-      MemoryTierCacheConfig::fromFile(folly::sformat("/tmp/tier{}-{}", i, ::getpid()))
-        .setRatio(ratio)
-    );
+    tierConfig.push_back(MemoryTierCacheConfig::fromFile(
+                             folly::sformat("/tmp/tier{}-{}", i, ::getpid()))
+                             .setRatio(ratio));
   }
   config.configureMemoryTiers(tierConfig)
-    .enableCachePersistence(
+      .enableCachePersistence(
           folly::sformat("/tmp/multi-tier-test/{}", ::getpid()))
-    .usePosixForShm();
+      .usePosixForShm();
   return config;
 }
 
@@ -103,11 +123,10 @@ std::string generateString(const size_t id, size_t length) {
 }
 
 template <typename AllocatorT>
-size_t insertGeneratedData(
-    const std::pair<size_t, size_t>& keyRange,
-    const std::pair<size_t, size_t>& dataSize,
-    AllocatorT& alloc,
-    PoolId poolId) {
+size_t insertGeneratedData(const std::pair<size_t, size_t>& keyRange,
+                           const std::pair<size_t, size_t>& dataSize,
+                           AllocatorT& alloc,
+                           PoolId poolId) {
   size_t itemsInserted = 0;
   size_t minItemSize = std::to_string(keyRange.second - 1).length();
 
@@ -135,10 +154,9 @@ size_t insertGeneratedData(
 }
 
 template <typename AllocatorT>
-size_t lookUpGeneratedKeys(
-    const std::pair<size_t, size_t>& keyRange,
-    const std::pair<size_t, size_t>& dataSize,
-    AllocatorT& alloc) {
+size_t lookUpGeneratedKeys(const std::pair<size_t, size_t>& keyRange,
+                           const std::pair<size_t, size_t>& dataSize,
+                           AllocatorT& alloc) {
   size_t itemsFound = 0;
   for (auto i = keyRange.first; i < keyRange.second; ++i) {
     auto key = generateString(i, dataSize.first);
@@ -163,7 +181,7 @@ size_t lookUpGeneratedKeys(
 template <typename AllocatorT>
 size_t lookUpKeys(std::set<std::string>& keys, AllocatorT& alloc) {
   size_t itemsFound = 0;
-  for (auto& key: keys) {
+  for (auto& key : keys) {
     auto x = alloc.find(key);
     if (x) {
       ++itemsFound;
@@ -195,11 +213,22 @@ class FunctionContext {
 template <typename Context>
 class Function {
   Context& context_;
+  std::set<std::string> taskLocalRemovedKeys;
+  std::set<std::string> taskLocalMovedKeys;
 
  public:
   Function(Context& context) : context_(context) {}
 
   Context& getContext() { return context_; }
+
+  void captureStats() {
+    taskLocalRemovedKeys = removedKeys;
+    taskLocalMovedKeys = movedKeys;
+  }
+
+  std::set<std::string>& getRemovedKeysSet() { return taskLocalRemovedKeys; }
+
+  std::set<std::string>& getMovedKeysSet() { return taskLocalMovedKeys; }
 };
 
 template <typename F>
@@ -208,6 +237,9 @@ class ParallelFunction {
   size_t stats_{};
   size_t numWorkers_;
   double ms_{};
+
+  std::set<std::string> totalRemovedKeys;
+  std::set<std::string> totalMovedKeys;
 
  public:
   ParallelFunction(F function,
@@ -236,6 +268,10 @@ class ParallelFunction {
 
   double getTime() const { return ms_; }
 
+  std::set<std::string>& getRemovedKeysSet() { return totalRemovedKeys; }
+
+  std::set<std::string>& getMovedKeysSet() { return totalMovedKeys; }
+
  protected:
   void run(const Range& r, std::vector<std::unique_ptr<F>>& workers) {
     reset();
@@ -252,6 +288,7 @@ class ParallelFunction {
       }
       threads.push_back(std::thread([&workers, i, begin, end]() {
         workers[i]->operator()(std::make_pair(begin, end));
+        workers[i]->captureStats();
       }));
       begin = end;
     }
@@ -259,6 +296,7 @@ class ParallelFunction {
     for (auto& thread : threads) {
       thread.join();
     }
+    gatherStats(workers);
     std::cout << "Threads Done" << std::endl;
   }
 
@@ -269,6 +307,15 @@ class ParallelFunction {
     ms_ = ms.count();
     std::cout << "Time: " << ms_ << std::endl;
     return ms_;
+  }
+
+  void gatherStats(std::vector<std::unique_ptr<F>>& workers) {
+    for (auto& worker : workers) {
+      totalRemovedKeys.insert(worker->getRemovedKeysSet().begin(),
+                              worker->getRemovedKeysSet().end());
+      totalMovedKeys.insert(worker->getMovedKeysSet().begin(),
+                            worker->getMovedKeysSet().end());
+    }
   }
 
   void reset() { ms_ = stats_ = 0; }
@@ -320,10 +367,8 @@ class LookupGeneratedKeys : public Function {
       : Function(context) {}
 
   void operator()(const Range& r) {
-    itemsFound_ =
-        lookUpGeneratedKeys<Allocator>(r,
-                                       this->getContext().getDataSize(),
-                                       this->getContext().getAllocator());
+    itemsFound_ = lookUpGeneratedKeys<Allocator>(
+        r, this->getContext().getDataSize(), this->getContext().getAllocator());
   }
 
   size_t getStats() { return itemsFound_; }

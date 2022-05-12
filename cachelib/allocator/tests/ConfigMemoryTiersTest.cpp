@@ -29,8 +29,6 @@ using LruMemoryTierConfigs = LruAllocatorConfig::MemoryTierConfigs;
 using Strings = std::vector<std::string>;
 using SizePair = std::tuple<size_t, size_t>;
 using SizePairs = std::vector<SizePair>;
-/* using StringDataKeyValue = std::pair<std::string, std::string>;
-using StringDataKeyValues = std::vector<StringDataKeyValue>; */
 
 const size_t defaultTotalCacheSize{1 * 1024 * 1024 * 1024};
 const std::string defaultCacheDir{"/var/metadataDir"};
