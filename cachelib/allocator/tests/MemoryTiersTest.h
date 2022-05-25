@@ -38,6 +38,8 @@ const char endOfPattern[] = "x";
 
 using LruAllocatorConfig = CacheAllocatorConfig<LruAllocator>;
 using LruMemoryTierConfigs = LruAllocatorConfig::MemoryTierConfigs;
+using RemoveCb = LruAllocatorConfig::RemoveCb;
+using MoveCb = LruAllocatorConfig::MoveCb;
 using StringDataKeyValue = std::pair<std::string, std::string>;
 using StringDataKeyValues = std::vector<StringDataKeyValue>;
 using Range = std::pair<size_t, size_t>;
@@ -47,20 +49,23 @@ using RemoveCbData = typename LruAllocator::RemoveCbData;
 thread_local std::set<std::string> movedKeys;
 thread_local std::set<std::string> removedKeys;
 
-auto moveCb = [&](const Item& oldItem, Item& newItem, Item*) {
+MoveCb moveCb = [&](const Item& oldItem, Item& newItem, Item*) {
   std::memcpy(newItem.getWritableMemory(), oldItem.getMemory(),
               oldItem.getSize());
   movedKeys.insert(oldItem.getKey().str());
 };
 
-auto removeCb = [&](const RemoveCbData& data) {
+RemoveCb removeCb = [&](const RemoveCbData& data) {
   removedKeys.insert(data.item.getKey().str());
 };
 
 template <typename AllocatorT = LruAllocator>
-typename AllocatorT::Config configTieredCache(size_t cacheSize,
-                                              size_t numTiers,
-                                              std::vector<size_t> ratios = {}) {
+typename AllocatorT::Config configTieredCache(
+    size_t cacheSize,
+    size_t numTiers,
+    std::vector<size_t> ratios = {},
+    MoveCb& moveCallback = moveCb,
+    RemoveCb& removeCallback = removeCb) {
   typename AllocatorT::Config config;
   std::vector<MemoryTierCacheConfig> tierConfig;
 
@@ -83,6 +88,9 @@ typename AllocatorT::Config configTieredCache(size_t cacheSize,
       .enableCachePersistence(
           folly::sformat("/tmp/multi-tier-test/{}", ::getpid()))
       .usePosixForShm();
+
+  config.setRemoveCallback(removeCallback);
+  config.enableMovingOnSlabRelease(moveCallback);
   return config;
 }
 
@@ -297,7 +305,6 @@ class ParallelFunction {
       thread.join();
     }
     gatherStats(workers);
-    std::cout << "Threads Done" << std::endl;
   }
 
   double recordTime(
@@ -305,7 +312,6 @@ class ParallelFunction {
       std::chrono::time_point<std::chrono::high_resolution_clock>& t2) {
     std::chrono::duration<double, std::milli> ms = t2 - t1;
     ms_ = ms.count();
-    std::cout << "Time: " << ms_ << std::endl;
     return ms_;
   }
 
